@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# Build outputs and caches
+.next/
+out/
+tsconfig.tsbuildinfo
+
+# Environment variables
+.env*.local
+.env
