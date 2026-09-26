@@ -147,7 +147,7 @@ production implementation was added:
 
 - Scaffolded a strict-TypeScript **Next.js 15 App Router** project with Tailwind CSS 3.
 - Implemented the editor/preview split workspace, toolbar, drag & drop overlay, templates modal, stats footer and toast system.
-- Built the PDF pipeline around lazily-imported `html2canvas` + `jspdf` with an off-screen, print-friendly clone of the preview (A4, 10 mm margins, 2× scale).
+- Built the PDF pipeline around lazily-imported `html2canvas` + `jspdf` with an off-screen, print-friendly clone of the preview (A4, 10 mm margins, 2× scale). Large documents are captured in horizontal **strips** that stay under the browser's canvas pixel-area limit (~16.8 MP), then blitted page-by-page into the PDF — so exports of thousands of lines no longer produce blank/failed PDFs. Memory is bounded because only one strip canvas and one page canvas exist at a time.
 - Hardened markdown rendering with `rehype-sanitize` and GFM via `remark-gfm`; added Prism syntax highlighting with theme-aware styles.
 - ESLint flat config, `vercel.json`, favicon and SEO metadata.
 

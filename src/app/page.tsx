@@ -167,6 +167,7 @@ export default function Home() {
       return;
     }
     setExportingPdf(true);
+    toast("Generating PDF… large documents may take a few seconds.", "info");
     try {
       await exportElementToPdf(el, {
         filename: `${sanitizeFilename(filename)}.pdf`,
@@ -174,8 +175,10 @@ export default function Home() {
         scale: 2,
       });
       toast("PDF downloaded", "success");
-    } catch {
-      toast("PDF export failed. Please try again.", "error");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "PDF export failed.";
+      toast(`PDF export failed: ${message}`, "error");
     } finally {
       setExportingPdf(false);
     }
