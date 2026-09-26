@@ -1,44 +1,51 @@
 /**
  * Client-side PDF generation.
  *
- * html2pdf.js bundles html2canvas + jsPDF internally, so we use it as the
- * single rendering pipeline and lazy-load it only when the user exports
- * (keeps the initial bundle small).
+ * Pipeline: html2canvas renders the styled preview clone to a canvas,
+ * jsPDF paginates that canvas into an A4 document with 10 mm margins.
+ * (We drive html2canvas + jsPDF directly instead of html2pdf.js because
+ * its bundled worker copies the source node into an `overflow: hidden`
+ * container whose height is measured unreliably under Tailwind's
+ * box-sizing reset — which produced blank pages in the exported PDF.)
+ *
+ * Both libraries are lazy-loaded so the initial bundle stays small.
  */
 
-interface Html2PdfOptions {
-  margin: [number, number, number, number];
-  filename: string;
-  image: { type: "jpeg"; quality: number };
-  html2canvas: {
-    scale: number;
-    useCORS: boolean;
-    backgroundColor: string;
-    logging: boolean;
-  };
-  jsPDF: {
-    unit: string;
-    format: string;
-    orientation: string;
-    putOnlyUsedFonts: boolean;
-  };
-  pagebreak: { mode: string[] };
+/** Convert millimetres to CSS pixels at 96 dpi. */
+const MM_TO_PX = 96 / 25.4;
+
+interface PdfDoc {
+  internal: { pageSize: { getWidth(): number; getHeight(): number } };
+  addPage(format?: string, orientation?: string): void;
+  addImage(
+    imageData: string,
+    format: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    alias?: string,
+    compression?: string,
+    rotation?: number
+  ): void;
+  save(filename: string): void;
 }
 
-interface Html2PdfWorker {
-  set: (options: Partial<Html2PdfOptions>) => Html2PdfWorker;
-  from: (element: HTMLElement) => Html2PdfWorker;
-  save: () => Promise<void>;
+async function loadHtml2Canvas(): Promise<
+  (el: HTMLElement, opts: Record<string, unknown>) => Promise<HTMLCanvasElement>
+> {
+  const mod = await import("html2canvas");
+  return (mod.default ?? mod) as unknown as (
+    el: HTMLElement,
+    opts: Record<string, unknown>
+  ) => Promise<HTMLCanvasElement>;
 }
 
-type Html2PdfFactory = () => Html2PdfWorker;
-
-async function loadHtml2Pdf(): Promise<Html2PdfFactory> {
-  const mod = (await import("html2pdf.js")) as unknown as {
-    default: Html2PdfFactory | (() => Html2PdfWorker);
-  };
-  const factory = mod.default ?? (mod as unknown as () => Html2PdfWorker);
-  return factory as Html2PdfFactory;
+async function loadJsPdf(): Promise<new (opts: Record<string, unknown>) => PdfDoc> {
+  const mod = await import("jspdf");
+  return (mod.jsPDF ?? mod) as unknown as new (
+    opts: Record<string, unknown>
+  ) => PdfDoc;
 }
 
 export interface PdfExportSettings {
@@ -47,6 +54,56 @@ export interface PdfExportSettings {
   marginMm?: number;
   /** Render scale multiplier (2 = high quality). */
   scale?: number;
+}
+
+/**
+ * Build a print-friendly, fully visible copy of the rendered markdown
+ * preview inside an off-screen container. The clone is detached from any
+ * scrollable/overflow-hidden ancestors so html2canvas captures the entire
+ * document height (this was the cause of blank PDF pages).
+ */
+function buildPrintSurface(element: HTMLElement): {
+  surface: HTMLElement;
+  cleanup: () => void;
+} {
+  const pageWidthPx = Math.round(210 * MM_TO_PX); // A4 width ≈ 794 px
+
+  const container = document.createElement("div");
+  container.setAttribute("aria-hidden", "true");
+  Object.assign(container.style, {
+    position: "fixed",
+    top: "0",
+    left: "-10000px",
+    width: `${pageWidthPx}px`,
+    background: "#ffffff",
+    color: "#111827",
+    overflow: "visible",
+  } as Partial<CSSStyleDeclaration>);
+  container.className = "pdf-export-surface";
+
+  const clone = element.cloneNode(true) as HTMLElement;
+  Object.assign(clone.style, {
+    width: "100%",
+    maxWidth: "100%",
+    height: "auto",
+    minHeight: "0",
+    maxHeight: "none",
+    overflow: "visible",
+    margin: "0",
+    transform: "none",
+    opacity: "1",
+  } as Partial<CSSStyleDeclaration>);
+  clone.classList.remove("prose-invert");
+
+  container.appendChild(clone);
+  document.body.appendChild(container);
+
+  return {
+    surface: clone,
+    cleanup: () => {
+      if (container.parentNode) container.parentNode.removeChild(container);
+    },
+  };
 }
 
 /**
@@ -63,47 +120,114 @@ export async function exportElementToPdf(
     scale = 2,
   } = settings;
 
-  const html2pdf = await loadHtml2Pdf();
+  const [html2canvas, JsPDF] = await Promise.all([
+    loadHtml2Canvas(),
+    loadJsPdf(),
+  ]);
 
-  // Clone into an off-screen container so the live DOM is untouched and
-  // dark-mode previews still render on a white, print-friendly surface.
-  const container = document.createElement("div");
-  container.style.position = "fixed";
-  container.style.left = "-10000px";
-  container.style.top = "0";
-  container.style.width = "794px"; // ~A4 width at 96dpi
-  container.style.background = "#ffffff";
-  container.style.color = "#111827";
-  container.className = "pdf-export-surface";
-
-  const clone = element.cloneNode(true) as HTMLElement;
-  clone.style.width = "100%";
-  clone.classList.remove("prose-invert");
-  container.appendChild(clone);
-  document.body.appendChild(container);
+  const { surface, cleanup } = buildPrintSurface(element);
 
   try {
-    const options: Partial<Html2PdfOptions> = {
-      margin: [marginMm, marginMm, marginMm, marginMm],
-      filename: filename.endsWith(".pdf") ? filename : `${filename}.pdf`,
-      image: { type: "jpeg", quality: 0.98 },
-      html2canvas: {
-        scale,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        logging: false,
-      },
-      jsPDF: {
-        unit: "mm",
-        format: "a4",
-        orientation: "portrait",
-        putOnlyUsedFonts: true,
-      },
-      pagebreak: { mode: ["avoid-all", "css", "legacy"] },
-    };
+    // Ensure images inside the clone have finished loading before capture.
+    const images = Array.from(surface.querySelectorAll("img"));
+    await Promise.all(
+      images.map(
+        (img) =>
+          img.complete
+            ? Promise.resolve()
+            : new Promise<void>((resolve) => {
+                img.onload = () => resolve();
+                img.onerror = () => resolve();
+              })
+      )
+    );
+    // Give layout/fonts one frame to settle in the print surface.
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
 
-    await html2pdf().set(options).from(clone).save();
+    const canvas = await html2canvas(surface, {
+      scale,
+      useCORS: true,
+      allowTaint: false,
+      backgroundColor: "#ffffff",
+      logging: false,
+      imageTimeout: 15000,
+      windowWidth: surface.scrollWidth,
+      windowHeight: surface.scrollHeight,
+      scrollX: 0,
+      scrollY: 0,
+    });
+
+    const docWidthPx = canvas.width;
+    const docHeightPx = canvas.height;
+
+    if (docWidthPx === 0 || docHeightPx === 0) {
+      throw new Error("Preview has nothing to render.");
+    }
+
+    const pdf = new JsPDF({
+      unit: "mm",
+      format: "a4",
+      orientation: "portrait",
+      compress: true,
+    });
+
+    const pageW = pdf.internal.pageSize.getWidth(); // 210
+    const pageH = pdf.internal.pageSize.getHeight(); // 297
+    const contentW = pageW - marginMm * 2;
+    const contentH = pageH - marginMm * 2;
+
+    // Height (in canvas px) that fits on one PDF page.
+    const sliceHpx = Math.floor((contentH * docHeightPx) / contentW);
+
+    let rendered = 0;
+    let pageIndex = 0;
+
+    while (rendered < docHeightPx) {
+      const sliceH = Math.min(sliceHpx, docHeightPx - rendered);
+
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = docWidthPx;
+      pageCanvas.height = sliceH;
+      const ctx = pageCanvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas 2D context unavailable.");
+
+      // White base so JPEG compression doesn't bleed black through
+      // transparent regions.
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, docWidthPx, sliceH);
+      ctx.drawImage(
+        canvas,
+        0,
+        rendered,
+        docWidthPx,
+        sliceH,
+        0,
+        0,
+        docWidthPx,
+        sliceH
+      );
+
+      const imgData = pageCanvas.toDataURL("image/jpeg", 0.95);
+      const imgH = (sliceH * contentW) / docWidthPx; // mm
+
+      if (pageIndex > 0) pdf.addPage("a4", "portrait");
+      pdf.addImage(
+        imgData,
+        "JPEG",
+        marginMm,
+        marginMm,
+        contentW,
+        imgH,
+        undefined,
+        "FAST"
+      );
+
+      rendered += sliceH;
+      pageIndex += 1;
+    }
+
+    pdf.save(filename.endsWith(".pdf") ? filename : `${filename}.pdf`);
   } finally {
-    document.body.removeChild(container);
+    cleanup();
   }
 }

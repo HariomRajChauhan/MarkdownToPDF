@@ -17,7 +17,7 @@ a professional A4 PDF — all in the browser. **Zero backend. Deploys on Vercel 
 |---|---------|-------------|
 | 1 | **Markdown Editor** | Large auto-resizing workspace with character / word / line counters and formatting toolbar (bold, italic, headings, lists, tables, blockquotes, code, links). `Ctrl/Cmd+B`, `Ctrl/Cmd+I` shortcuts. |
 | 2 | **Live Preview** | Real-time rendering via `react-markdown` + `remark-gfm`. Headings, bold/italic, nested & ordered lists, tables, images, links, blockquotes, horizontal rules, task-list checkboxes, code blocks. |
-| 3 | **PDF Export** | One click → high-quality paginated **A4** PDF with **10 mm margins** (`html2pdf.js` = `html2canvas` + `jsPDF`). Preserves styling, tables, lists, images, colors and code blocks. Default filename `document.pdf` (or derived from the imported file name). |
+| 3 | **PDF Export** | One click → high-quality paginated **A4** PDF with **10 mm margins** (`html2canvas` + `jsPDF`). Preserves styling, tables, lists, images, colors and code blocks. Default filename `document.pdf` (or derived from the imported file name). |
 | 4 | **File Import** | Upload `.md` / `.markdown` files; content loads instantly into the editor. |
 | 5 | **Drag & Drop** | Drop a markdown file anywhere on the page — overlay feedback, instant load. |
 | 6 | **Dark Mode** | Beautiful light/dark themes, persisted in `localStorage`, applied pre-paint (no flash). |
@@ -33,7 +33,7 @@ a professional A4 PDF — all in the browser. **Zero backend. Deploys on Vercel 
 
 ### Non-functional
 
-- **Performance** — static prerender, lazy-loaded PDF pipeline (html2pdf only fetched on export), memoized preview.
+- **Performance** — static prerender, lazy-loaded PDF pipeline (html2canvas/jsPDF only fetched on export), memoized preview.
 - **Accessibility** — ARIA labels/roles, keyboard navigation, visible focus rings, `aria-live` toasts, dialog with Escape handling.
 - **Security** — no unsafe HTML execution: rendering is sanitized with `rehype-sanitize`; links get `rel="noopener noreferrer"`.
 - **SEO** — metadata, Open Graph and Twitter card tags, semantic landmarks.
@@ -46,7 +46,7 @@ a professional A4 PDF — all in the browser. **Zero backend. Deploys on Vercel 
 - **Language:** TypeScript (strict)
 - **Styling:** Tailwind CSS 3 + `@tailwindcss/typography`
 - **Markdown:** `react-markdown`, `remark-gfm`, `rehype-sanitize`
-- **PDF:** `html2pdf.js` (bundles `html2canvas` + `jspdf`)
+- **PDF:** `html2canvas` + `jspdf`
 - **Highlighting:** `react-syntax-highlighter` (Prism, One Light/Dark)
 - **Icons:** `lucide-react`
 - **State:** React hooks · **Storage:** `localStorage`
@@ -77,11 +77,10 @@ src/
 │   └── useToasts.ts        # Minimal notification store
 ├── lib/
 │   ├── markdown.ts         # Stats, clipboard, download, file helpers
-│   ├── pdf.ts              # Lazy html2pdf A4 export pipeline
+│   ├── pdf.ts              # Lazy html2canvas + jsPDF A4 export pipeline
 │   └── templates.ts        # Built-in markdown templates
 └── types/
     ├── index.ts            # Shared interfaces
-    └── html2pdf.d.ts       # Ambient typings for html2pdf.js
 ```
 
 ---
@@ -148,14 +147,14 @@ production implementation was added:
 
 - Scaffolded a strict-TypeScript **Next.js 15 App Router** project with Tailwind CSS 3.
 - Implemented the editor/preview split workspace, toolbar, drag & drop overlay, templates modal, stats footer and toast system.
-- Built the PDF pipeline around lazily-imported `html2pdf.js` with an off-screen, print-friendly clone of the preview (A4, 10 mm margins, 2× scale).
+- Built the PDF pipeline around lazily-imported `html2canvas` + `jspdf` with an off-screen, print-friendly clone of the preview (A4, 10 mm margins, 2× scale).
 - Hardened markdown rendering with `rehype-sanitize` and GFM via `remark-gfm`; added Prism syntax highlighting with theme-aware styles.
-- Added ambient typings for `html2pdf.js`, ESLint flat config, `vercel.json`, favicon and SEO metadata.
+- ESLint flat config, `vercel.json`, favicon and SEO metadata.
 
 ## 📦 Dependencies
 
 **Runtime:** `next`, `react`, `react-dom`, `react-markdown`, `remark-gfm`,
-`rehype-sanitize`, `react-syntax-highlighter`, `html2pdf.js`, `html2canvas`,
+`rehype-sanitize`, `react-syntax-highlighter`, `html2canvas`,
 `jspdf`, `lucide-react`
 
 **Development:** `typescript`, `tailwindcss`, `@tailwindcss/typography`,

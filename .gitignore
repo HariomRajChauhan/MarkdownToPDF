@@ -1,11 +1,24 @@
 # Dependencies
 node_modules/
 
-# Build outputs and caches
+# Next.js build output
 .next/
 out/
-tsconfig.tsbuildinfo
 
-# Environment variables
-.env*.local
-.env
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local env files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Vercel
+.vercel
